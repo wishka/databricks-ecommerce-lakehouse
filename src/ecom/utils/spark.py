@@ -68,6 +68,22 @@ def delta_enabled(spark: Any) -> bool:
         return False
 
 
+def conf_get(spark: Any, key: str, default: str = "") -> str:
+    """Безопасное чтение Spark conf.
+
+    На serverless (Spark Connect) `spark.conf.get(key, default)` для
+    незаданного пользовательского ключа не возвращает дефолт, а бросает
+    CONFIG_NOT_AVAILABLE. Поэтому дефолт подставляем сами.
+    """
+    if spark is None:
+        return default
+    try:
+        value = spark.conf.get(key)
+    except Exception:
+        return default
+    return default if value is None else str(value)
+
+
 def table_exists(spark: Any, full_name: str) -> bool:
     try:
         return spark.catalog.tableExists(full_name)

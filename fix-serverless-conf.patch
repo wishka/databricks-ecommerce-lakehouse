@@ -1,0 +1,242 @@
+From 1c1413c368fdf225f0e46c62a1702ad331fd3c78 Mon Sep 17 00:00:00 2001
+From: Andrew <roucke013@gmail.com>
+Date: Mon, 21 Sep 2026 14:58:45 +0300
+Subject: [PATCH] =?UTF-8?q?fix(serverless):=20spark.conf.get=20=D0=BD?=
+ =?UTF-8?q?=D0=B5=20=D0=B2=D0=BE=D0=B7=D0=B2=D1=80=D0=B0=D1=89=D0=B0=D0=B5?=
+ =?UTF-8?q?=D1=82=20=D0=B4=D0=B5=D1=84=D0=BE=D0=BB=D1=82=20=D0=B4=D0=BB?=
+ =?UTF-8?q?=D1=8F=20=D0=BD=D0=B5=D0=B7=D0=B0=D0=B4=D0=B0=D0=BD=D0=BD=D0=BE?=
+ =?UTF-8?q?=D0=B3=D0=BE=20=D0=BA=D0=BB=D1=8E=D1=87=D0=B0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+На serverless обращение к незаданному пользовательскому ключу бросает
+CONFIG_NOT_AVAILABLE вместо возврата дефолта — из-за этого падал
+%run ../_bootstrap в чистом воркспейсе. Добавлен conf_get с безопасным
+дефолтом, он же применён к spark.databricks.job.runId в bronze-ноутбуке
+и к чтению ecom.catalog в LDP-пайплайне.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Teeq3Fthqp7719jTp6k6Ft
+---
+ .python-version                            |  1 +
+ notebooks/01_batch/10_bronze_autoloader.py |  5 +-
+ pipelines/ecommerce_ldp/00_bronze.py       |  7 +-
+ pyproject.toml                             |  2 +-
+ src/ecom/config.py                         |  4 +-
+ src/ecom/utils/__init__.py                 | 11 ++-
+ src/ecom/utils/spark.py                    | 16 +++++
+ tests/test_config.py                       | 79 ++++++++++++++++++++++
+ 8 files changed, 119 insertions(+), 6 deletions(-)
+ create mode 100644 .python-version
+ create mode 100644 tests/test_config.py
+
+diff --git a/.python-version b/.python-version
+new file mode 100644
+index 0000000..2c07333
+--- /dev/null
++++ b/.python-version
+@@ -0,0 +1 @@
++3.11
+diff --git a/notebooks/01_batch/10_bronze_autoloader.py b/notebooks/01_batch/10_bronze_autoloader.py
+index 53b3357..995cc52 100644
+--- a/notebooks/01_batch/10_bronze_autoloader.py
++++ b/notebooks/01_batch/10_bronze_autoloader.py
+@@ -35,6 +35,7 @@ from pyspark.sql import functions as F
+ 
+ from ecom.config import Config
+ from ecom.utils.logging import get_logger
++from ecom.utils.spark import conf_get
+ 
+ log = get_logger("bronze")
+ cfg = Config(catalog=dbutils.widgets.get("catalog"))  # noqa: F821
+@@ -89,7 +90,9 @@ def ingest_to_bronze(
+         .withColumn("_source_file", F.col("_metadata.file_path"))
+         .withColumn("_file_modified_at", F.col("_metadata.file_modification_time"))
+         .withColumn("_ingested_at", F.current_timestamp())
+-        .withColumn("_batch_id", F.lit(spark.conf.get("spark.databricks.job.runId", "manual")))  # noqa: F821
++        # вне джобы runId не задан — на serverless обращение к нему бросает
++        # CONFIG_NOT_AVAILABLE, поэтому читаем через conf_get
++        .withColumn("_batch_id", F.lit(conf_get(spark, "spark.databricks.job.runId", "manual")))  # noqa: F821
+     )
+ 
+     writer = (
+diff --git a/pipelines/ecommerce_ldp/00_bronze.py b/pipelines/ecommerce_ldp/00_bronze.py
+index d9eac9b..e771cd7 100644
+--- a/pipelines/ecommerce_ldp/00_bronze.py
++++ b/pipelines/ecommerce_ldp/00_bronze.py
+@@ -20,7 +20,12 @@ from pyspark import pipelines as dp
+ from pyspark.sql import functions as F
+ 
+ # Параметры пайплайна: заданы в spec как `configuration`.
+-CATALOG = spark.conf.get("ecom.catalog", "ecom_dev")  # noqa: F821
++# Если пайплайн запущен из UI без configuration, ключа не будет — и на
++# serverless обращение к нему бросит CONFIG_NOT_AVAILABLE, а не вернёт дефолт.
++try:
++    CATALOG = spark.conf.get("ecom.catalog")  # noqa: F821
++except Exception:
++    CATALOG = "ecom_dev"
+ LANDING = f"/Volumes/{CATALOG}/raw/landing"
+ 
+ COMMON_CLOUDFILES = {
+diff --git a/pyproject.toml b/pyproject.toml
+index 1d8866e..9784e2f 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
+ name = "ecom-lakehouse"
+ version = "0.1.0"
+ description = "E-commerce lakehouse on Databricks: medallion, LDP, streaming, governance, ML"
+-requires-python = ">=3.11"
++requires-python = ">=3.11,<3.12"  # PySpark 3.5 не поддерживает Python 3.12+
+ dependencies = []
+ 
+ [project.optional-dependencies]
+diff --git a/src/ecom/config.py b/src/ecom/config.py
+index c1b54e6..4c639f6 100644
+--- a/src/ecom/config.py
++++ b/src/ecom/config.py
+@@ -24,7 +24,9 @@ def resolve_catalog(catalog: str | None = None, spark=None) -> str:
+     if catalog:
+         return catalog
+     if spark is not None:
+-        from_conf = spark.conf.get("ecom.catalog", "")
++        from ecom.utils.spark import conf_get
++
++        from_conf = conf_get(spark, "ecom.catalog")
+         if from_conf:
+             return from_conf
+     return os.environ.get("ECOM_CATALOG", DEFAULT_CATALOG)
+diff --git a/src/ecom/utils/__init__.py b/src/ecom/utils/__init__.py
+index f3990e6..3b5bddb 100644
+--- a/src/ecom/utils/__init__.py
++++ b/src/ecom/utils/__init__.py
+@@ -1,4 +1,11 @@
+ from ecom.utils.logging import get_logger
+-from ecom.utils.spark import delta_enabled, get_spark, sql_scalar, table_exists
++from ecom.utils.spark import conf_get, delta_enabled, get_spark, sql_scalar, table_exists
+ 
+-__all__ = ["delta_enabled", "get_logger", "get_spark", "sql_scalar", "table_exists"]
++__all__ = [
++    "conf_get",
++    "delta_enabled",
++    "get_logger",
++    "get_spark",
++    "sql_scalar",
++    "table_exists",
++]
+diff --git a/src/ecom/utils/spark.py b/src/ecom/utils/spark.py
+index f76968b..4837685 100644
+--- a/src/ecom/utils/spark.py
++++ b/src/ecom/utils/spark.py
+@@ -68,6 +68,22 @@ def delta_enabled(spark: Any) -> bool:
+         return False
+ 
+ 
++def conf_get(spark: Any, key: str, default: str = "") -> str:
++    """Безопасное чтение Spark conf.
++
++    На serverless (Spark Connect) `spark.conf.get(key, default)` для
++    незаданного пользовательского ключа не возвращает дефолт, а бросает
++    CONFIG_NOT_AVAILABLE. Поэтому дефолт подставляем сами.
++    """
++    if spark is None:
++        return default
++    try:
++        value = spark.conf.get(key)
++    except Exception:
++        return default
++    return default if value is None else str(value)
++
++
+ def table_exists(spark: Any, full_name: str) -> bool:
+     try:
+         return spark.catalog.tableExists(full_name)
+diff --git a/tests/test_config.py b/tests/test_config.py
+new file mode 100644
+index 0000000..29c201f
+--- /dev/null
++++ b/tests/test_config.py
+@@ -0,0 +1,79 @@
++"""Тесты резолвинга каталога.
++
++Регрессия: на serverless `spark.conf.get(key, default)` для незаданного
++пользовательского ключа не возвращает дефолт, а бросает CONFIG_NOT_AVAILABLE.
++Из-за этого падал `%run ../_bootstrap` в чистом воркспейсе.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from ecom.config import DEFAULT_CATALOG, Config, load_config, resolve_catalog
++from ecom.utils.spark import conf_get
++
++
++class _RaisingConf:
++    """Имитация serverless: незаданный ключ бросает исключение."""
++
++    class conf:
++        @staticmethod
++        def get(key):
++            raise RuntimeError(f"[CONFIG_NOT_AVAILABLE] {key} is not available")
++
++
++class _SetConf:
++    class conf:
++        @staticmethod
++        def get(key):
++            return "ecom_prod"
++
++
++def test_conf_get_returns_default_when_key_raises():
++    assert conf_get(_RaisingConf(), "ecom.catalog", "fallback") == "fallback"
++
++
++def test_conf_get_returns_value_when_key_set():
++    assert conf_get(_SetConf(), "ecom.catalog", "fallback") == "ecom_prod"
++
++
++def test_conf_get_handles_none_spark():
++    assert conf_get(None, "ecom.catalog", "fallback") == "fallback"
++
++
++def test_resolve_catalog_survives_missing_conf():
++    assert resolve_catalog(spark=_RaisingConf()) == DEFAULT_CATALOG
++
++
++def test_resolve_catalog_reads_conf():
++    assert resolve_catalog(spark=_SetConf()) == "ecom_prod"
++
++
++def test_explicit_argument_wins():
++    assert load_config("ecom_test", spark=_SetConf()).catalog == "ecom_test"
++
++
++def test_env_var_used_when_no_spark(monkeypatch):
++    monkeypatch.setenv("ECOM_CATALOG", "ecom_from_env")
++    assert resolve_catalog() == "ecom_from_env"
++
++
++@pytest.mark.parametrize(
++    ("attr", "expected"),
++    [
++        ("bronze_orders", "ecom_dev.bronze.orders_raw"),
++        ("silver_customers_scd2", "ecom_dev.silver.customers_scd2"),
++        ("gold_fct_order_items", "ecom_dev.gold.fct_order_items"),
++        ("ops_dq_results", "ecom_dev.ops.dq_results"),
++        ("ml_churn_model", "ecom_dev.ml.churn_model"),
++    ],
++)
++def test_table_names(attr, expected):
++    assert getattr(Config(), attr) == expected
++
++
++def test_volume_paths():
++    cfg = Config(catalog="ecom_prod")
++    assert cfg.volume_root() == "/Volumes/ecom_prod/raw/landing"
++    assert cfg.landing_path("orders") == "/Volumes/ecom_prod/raw/landing/orders"
++    assert cfg.checkpoint_path("s") == "/Volumes/ecom_prod/raw/landing/_checkpoints/s"
+-- 
+2.43.0
+

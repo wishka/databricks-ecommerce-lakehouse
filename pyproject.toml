@@ -7,9 +7,13 @@ name = "ecom-lakehouse"
 version = "0.1.0"
 description = "E-commerce lakehouse on Databricks: medallion, LDP, streaming, governance, ML"
 requires-python = ">=3.11,<3.12"  # PySpark 3.5 не поддерживает Python 3.12+
+<<<<<<< ours
 dependencies = [
     "pytest>=9.1.1",
 ]
+=======
+dependencies = []
+>>>>>>> theirs
 
 [project.optional-dependencies]
 dev = [
