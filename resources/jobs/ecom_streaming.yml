@@ -1,0 +1,60 @@
+# Стриминговая джоба: продюсер и консьюмер работают одновременно.
+#
+# Две задачи без depends_on между собой → запускаются параллельно.
+# Free Edition: не больше 5 одновременных задач на аккаунт — здесь их две.
+#
+# continuous вместо schedule означает «как только закончился прогон, начни новый».
+# Для Free Edition это дорого по бесплатной квоте, поэтому по умолчанию PAUSED.
+
+resources:
+  jobs:
+    ecom_streaming:
+      name: "[${bundle.target}] ecom · streaming clickstream"
+      description: Продюсер событий + оконные агрегаты near-real-time (Part 3)
+
+      tags:
+        project: ecom-lakehouse
+        part: "3"
+
+      max_concurrent_runs: 1
+
+      continuous:
+        pause_status: PAUSED
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+
+      tasks:
+        - task_key: producer
+          description: Подкладывает новые файлы событий в landing
+          notebook_task:
+            notebook_path: ../../notebooks/03_streaming/30_clickstream_producer.py
+            base_parameters:
+              catalog: ${var.catalog}
+              batches: "30"
+              interval_sec: "20"
+              events_per_batch: "500"
+          timeout_seconds: 1800
+
+        - task_key: windowed_aggregation
+          description: Auto Loader → 5-минутные окна → MERGE в gold
+          notebook_task:
+            notebook_path: ../../notebooks/03_streaming/31_streaming_aggregations.py
+            base_parameters:
+              catalog: ${var.catalog}
+              mode: "continuous"
+              run_minutes: "10"
+          timeout_seconds: 1800
+          max_retries: 3
+          min_retry_interval_millis: 30000
+
+      health:
+        rules:
+          - metric: RUN_DURATION_SECONDS
+            op: GREATER_THAN
+            value: 2400
+
+      # Уведомления: раскомментируйте и подставьте свой адрес
+      # email_notifications:
+      #   on_failure: ["you@example.com"]

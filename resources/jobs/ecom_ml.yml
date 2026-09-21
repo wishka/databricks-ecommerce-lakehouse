@@ -1,0 +1,59 @@
+# ML-джоба: фичи → обучение → регистрация модели → батч-инференс.
+#
+# Обучение запускается раз в неделю, инференс — ежедневно.
+# Здесь это одна джоба с двумя ветками: `train` зависит от `features`,
+# `score` зависит от `features` и запускается независимо от результата train
+# (если обучение упало, скорим прошлым чемпионом).
+
+resources:
+  jobs:
+    ecom_ml:
+      name: "[${bundle.target}] ecom · churn model"
+      description: Фичи, обучение и батч-скоринг модели оттока (Part 6)
+
+      tags:
+        project: ecom-lakehouse
+        part: "6"
+
+      max_concurrent_runs: 1
+
+      schedule:
+        quartz_cron_expression: "0 0 5 ? * MON"
+        timezone_id: UTC
+        pause_status: PAUSED
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+
+      tasks:
+        - task_key: features
+          notebook_task:
+            notebook_path: ../../notebooks/06_analytics_ml/61_feature_engineering.py
+            base_parameters:
+              catalog: ${var.catalog}
+
+        - task_key: train
+          depends_on:
+            - task_key: features
+          notebook_task:
+            notebook_path: ../../notebooks/06_analytics_ml/62_mlflow_train.py
+            base_parameters:
+              catalog: ${var.catalog}
+              register_model: "true"
+          timeout_seconds: 5400
+
+        - task_key: score
+          depends_on:
+            - task_key: features
+            - task_key: train
+          run_if: AT_LEAST_ONE_SUCCESS
+          notebook_task:
+            notebook_path: ../../notebooks/06_analytics_ml/63_batch_inference.py
+            base_parameters:
+              catalog: ${var.catalog}
+              model_alias: "champion"
+
+      # Уведомления: раскомментируйте и подставьте свой адрес
+      # email_notifications:
+      #   on_failure: ["you@example.com"]

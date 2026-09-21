@@ -1,0 +1,57 @@
+# Databricks Asset Bundle — описание всего проекта как кода.
+#
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run ecom_batch_medallion -t dev
+#
+# Всё, что деплоится (джобы, пайплайн, файлы), описано здесь и в resources/.
+# Никаких «сделал руками в UI и забыл» — это главный смысл бандла.
+
+bundle:
+  name: ecom-lakehouse
+
+include:
+  - resources/jobs/*.yml
+  - resources/pipelines/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog, в который пишет окружение
+    default: ecom_dev
+  landing_start_date:
+    description: С какой даты генерировать исходные данные
+    default: "2026-08-01"
+  landing_days:
+    description: Сколько дней данных сгенерировать
+    default: "21"
+  # Уведомления по умолчанию выключены, чтобы деплой не требовал настройки.
+  # Включаются раскомментированием блоков email_notifications в resources/jobs/*.yml.
+
+# Пакет `ecom` собирается в wheel и ставится в окружение задач и пайплайна,
+# чтобы ноутбуки и LDP импортировали одну и ту же протестированную логику.
+artifacts:
+  ecom_wheel:
+    type: whl
+    path: .
+
+targets:
+  dev:
+    mode: development # к именам ресурсов добавляется [dev <user>], джобы ставятся на паузу
+    default: true
+    workspace:
+      # Замените на хост своего воркспейса (Free Edition тоже подходит)
+      host: https://dbc-ad3f947c-7375.cloud.databricks.com
+    variables:
+      catalog: ecom_dev
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-ad3f947c-7375.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: ecom_prod
+    # В Free Edition воркспейс один, поэтому prod — это просто другой каталог.
+    # На платном воркспейсе здесь же задают run_as и permissions:
+    # run_as:
+    #   service_principal_name: <app-id>

@@ -1,0 +1,41 @@
+# Джоба первичной инициализации: каталог, схемы, volume и генерация данных.
+# Запускается вручную один раз (и повторно, если нужно перегенерировать landing).
+
+resources:
+  jobs:
+    ecom_bootstrap:
+      name: "[${bundle.target}] ecom · bootstrap"
+      description: |
+        Создаёт Unity Catalog-объекты и наполняет landing-зону синтетическими данными.
+        Part 0 роадмапа.
+
+      tags:
+        project: ecom-lakehouse
+        part: "0"
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+
+      tasks:
+        - task_key: create_catalog
+          description: Каталог, схемы, volume, ops.pipeline_audit
+          notebook_task:
+            notebook_path: ../../notebooks/00_setup/00_create_catalog.sql
+            base_parameters:
+              catalog: ${var.catalog}
+
+        - task_key: generate_raw_data
+          depends_on:
+            - task_key: create_catalog
+          notebook_task:
+            notebook_path: ../../notebooks/00_setup/01_generate_raw_data.py
+            base_parameters:
+              catalog: ${var.catalog}
+              start_date: ${var.landing_start_date}
+              days: ${var.landing_days}
+              orders_per_day: "800"
+              reset: "false"
+
+      queue:
+        enabled: true
