@@ -1,0 +1,45 @@
+# Lakeflow Spark Declarative Pipeline (Part 2).
+#
+# Free Edition: активен может быть только один пайплайн каждого типа —
+# поэтому он здесь один и пишет в отдельную схему `ldp`, не конфликтуя
+# с batch-медальоном из Part 1.
+#
+# `environment.dependencies` ставит наш же пакет `ecom` из задеплоенных
+# файлов воркспейса — благодаря этому пайплайн импортирует тот же реестр
+# DQ-правил, что и batch-версия. Это ключевой приём: одна логика, две реализации.
+
+resources:
+  pipelines:
+    ecommerce_ldp:
+      name: "[${bundle.target}] ecom · declarative pipeline"
+      catalog: ${var.catalog}
+      schema: ldp
+      serverless: true
+      continuous: false # triggered: запускается по требованию/расписанию
+      # development режимом управляет бандл: `mode: development` у target dev
+      # включает его, `mode: production` — выключает.
+
+      root_path: ../../pipelines/ecommerce_ldp
+
+      libraries:
+        - glob:
+            include: ../../pipelines/ecommerce_ldp/**
+
+      environment:
+        dependencies:
+          - --editable ${workspace.file_path}
+
+      configuration:
+        ecom.catalog: ${var.catalog}
+
+      # Публикуем event log как таблицу UC — из неё в Part 2.5 строится
+      # отчёт по expectations.
+      event_log:
+        catalog: ${var.catalog}
+        schema: ops
+        name: ldp_event_log
+
+      # Уведомления: раскомментируйте и подставьте свой адрес
+      # notifications:
+      #   - email_recipients: ["you@example.com"]
+      #     alerts: [on-update-failure, on-flow-failure]
