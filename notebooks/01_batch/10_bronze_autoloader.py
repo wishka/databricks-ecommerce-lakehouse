@@ -35,6 +35,7 @@ from pyspark.sql import functions as F
 
 from ecom.config import Config
 from ecom.utils.logging import get_logger
+from ecom.utils.spark import conf_get
 
 log = get_logger("bronze")
 cfg = Config(catalog=dbutils.widgets.get("catalog"))  # noqa: F821
@@ -89,7 +90,9 @@ def ingest_to_bronze(
         .withColumn("_source_file", F.col("_metadata.file_path"))
         .withColumn("_file_modified_at", F.col("_metadata.file_modification_time"))
         .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("_batch_id", F.lit(spark.conf.get("spark.databricks.job.runId", "manual")))  # noqa: F821
+        # вне джобы runId не задан — на serverless обращение к нему бросает
+        # CONFIG_NOT_AVAILABLE, поэтому читаем через conf_get
+        .withColumn("_batch_id", F.lit(conf_get(spark, "spark.databricks.job.runId", "manual")))  # noqa: F821
     )
 
     writer = (

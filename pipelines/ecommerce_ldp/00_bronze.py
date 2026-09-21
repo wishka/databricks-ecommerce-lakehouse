@@ -20,7 +20,12 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 # Параметры пайплайна: заданы в spec как `configuration`.
-CATALOG = spark.conf.get("ecom.catalog", "ecom_dev")  # noqa: F821
+# Если пайплайн запущен из UI без configuration, ключа не будет — и на
+# serverless обращение к нему бросит CONFIG_NOT_AVAILABLE, а не вернёт дефолт.
+try:
+    CATALOG = spark.conf.get("ecom.catalog")  # noqa: F821
+except Exception:
+    CATALOG = "ecom_dev"
 LANDING = f"/Volumes/{CATALOG}/raw/landing"
 
 COMMON_CLOUDFILES = {
