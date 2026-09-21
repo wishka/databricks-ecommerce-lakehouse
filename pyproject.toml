@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecom-lakehouse"
+version = "0.1.0"
+description = "E-commerce lakehouse on Databricks: medallion, LDP, streaming, governance, ML"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pyspark==3.5.*",
+    "delta-spark==3.2.*",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# В ноутбуках: импорты идут после виджетов (E402), dbutils/spark/display —
+# глобалы рантайма (F821), а «голое» выражение в конце ячейки печатает
+# результат — это идиома ноутбука, а не забытая строка (B018).
+"notebooks/**" = ["E402", "F821", "B018"]
+"pipelines/**" = ["E402", "F821", "B018"]

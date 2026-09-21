@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.env
+.envrc
+
+# Databricks
+.databricks/
+.databricks-login.json
+*.dbc
+
+# Spark local runs
+spark-warehouse/
+metastore_db/
+derby.log
+_checkpoints/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
