@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC # Part 0 — Генерация исходных данных в Volume
 # MAGIC
@@ -17,7 +21,37 @@
 
 # COMMAND ----------
 
-# MAGIC %run ../_bootstrap
+# DBTITLE 1,Bootstrap
+import pathlib, sys, traceback
+
+# Inline bootstrap for diagnostics
+try:
+    here = pathlib.Path.cwd().resolve()
+    print(f"CWD = {here}")
+    found = False
+    for candidate in [here, *here.parents]:
+        src = candidate / "src"
+        if (src / "ecom" / "__init__.py").exists():
+            if str(src) not in sys.path:
+                sys.path.insert(0, str(src))
+            print(f"ecom src = {src}")
+            found = True
+            break
+    if not found:
+        raise RuntimeError(f"src/ecom not found from {here}")
+
+    # Force fresh import
+    for mod_name in list(sys.modules):
+        if mod_name.startswith("ecom"):
+            del sys.modules[mod_name]
+
+    from ecom.config import load_config
+    CFG = load_config(spark=spark)
+    print(f"catalog: {CFG.catalog}")
+    ECOM_SRC = str(src)
+except Exception:
+    traceback.print_exc()
+    raise
 
 # COMMAND ----------
 

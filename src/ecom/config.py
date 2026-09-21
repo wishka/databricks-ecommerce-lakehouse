@@ -24,7 +24,10 @@ def resolve_catalog(catalog: str | None = None, spark=None) -> str:
     if catalog:
         return catalog
     if spark is not None:
-        from_conf = spark.conf.get("ecom.catalog", "")
+        try:
+            from_conf = spark.conf.get("ecom.catalog", "")
+        except Exception:
+            from_conf = ""
         if from_conf:
             return from_conf
     return os.environ.get("ECOM_CATALOG", DEFAULT_CATALOG)
